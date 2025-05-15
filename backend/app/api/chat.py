@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from api.pdf_upload import db, GeminiEmbeddingFunction
@@ -56,3 +57,16 @@ async def chat(req: ChatRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating answer: {str(e)}")
+=======
+from fastapi import APIRouter, Request
+from pydantic import BaseModel
+
+router = APIRouter()
+
+class ChatRequest(BaseModel):
+    question: str
+
+@router.post("/")
+async def chat(req: ChatRequest):
+    return {"answer": f"You asked: {req.question}"}
+>>>>>>> origin/main

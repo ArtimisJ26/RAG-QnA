@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import os
 import glob
 from fastapi import APIRouter, UploadFile, File, HTTPException
@@ -111,3 +112,12 @@ async def upload_pdf(file: UploadFile = File(...)):
             os.remove(temp_path)
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
 
+=======
+from fastapi import APIRouter, UploadFile, File
+
+router = APIRouter()
+
+@router.post("/")
+async def upload_pdf(file: UploadFile = File(...)):
+    return {"filename": file.filename}
+>>>>>>> origin/main
