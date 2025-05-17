@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
-from api.pdf_upload import db, GeminiEmbeddingFunction
+from app.api.pdf_upload import db, GeminiEmbeddingFunction
 import chromadb
 
 router = APIRouter()

@@ -67,9 +67,7 @@ async def upload_pdf(file: UploadFile = File(...)):
     with open(temp_path, "wb") as buffer:
         buffer.write(await file.read())
 
-
     try:
-
         documents, document_sources = [], []
 
         # Open the uploaded PDF file.
@@ -87,13 +85,22 @@ async def upload_pdf(file: UploadFile = File(...)):
                     # Store that text in a list (to prepare for chunking + embedding later).
                     document_sources.extend([f"{filename} (Page {page_num+1}, Chunk {i+1})" for i in range(len(chunks))])
         
-        # Add to vector database
-        if documents:
+        # Add to vector database in batches of 100
+        total_added = 0
+        batch_size = 100
+        
+        while total_added < len(documents):
+            batch_end = min(total_added + batch_size, len(documents))
+            batch_docs = documents[total_added:batch_end]
+            batch_sources = document_sources[total_added:batch_end]
+            
             db.add(
-                documents=documents,
-                ids=[str(uuid.uuid4()) for _ in documents],
-                metadatas=[{"source": source} for source in document_sources]
+                documents=batch_docs,
+                ids=[str(uuid.uuid4()) for _ in batch_docs],
+                metadatas=[{"source": source} for source in batch_sources]
             )
+            
+            total_added = batch_end
         
         # Clean up temp file
         os.remove(temp_path)
@@ -101,8 +108,8 @@ async def upload_pdf(file: UploadFile = File(...)):
         return {
             "filename": file.filename,
             "pages_processed": len(documents),
-            "total_documents": db.count()
-            # "extracted_pages": documents    # For checking generated chunks of documents
+            "total_documents": db.count(),
+            "batches_processed": (total_added + batch_size - 1) // batch_size
         }
 
     except Exception as e:
