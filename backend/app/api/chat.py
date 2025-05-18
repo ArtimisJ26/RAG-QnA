@@ -13,7 +13,7 @@ router = APIRouter()
 class Query(BaseModel):
     query: str
 
-@router.post("/")
+@router.post("")
 async def chat(query: Query):
     if not query.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")

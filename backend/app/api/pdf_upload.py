@@ -64,40 +64,85 @@ def chunk_text(text, max_length=500, overlap=50):
 
 
 # Define a POST endpoint /api/upload/ that accepts a PDF file.
-@router.post("/")
+@router.post("")
 async def upload_pdf(file: UploadFile = File(...)):
-    # Validate that the uploaded file ends in .pdf.
+    # Get the maximum file size from app state
+    max_size = 50 * 1024 * 1024  # 50MB default if not set in app state
+    
+    # Validate that the uploaded file ends in .pdf first
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
     
     try:
-        # Read the file into memory
-        contents = await file.read()
+        # Read file in chunks to avoid memory issues
+        contents = bytearray()
+        file_size = 0
+        chunk_size = 1024 * 1024  # 1MB chunks
+        
+        while True:
+            try:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > max_size:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum size allowed is 50MB"
+                    )
+                contents.extend(chunk)
+            except Exception as e:
+                logger.error(f"Error reading chunk: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Error during file upload. Please try again."
+                )
+        
+        if file_size == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Empty file uploaded"
+            )
+        
+        # Create BytesIO object from contents
         pdf_stream = BytesIO(contents)
         
         try:
             # Try to read the PDF
             pdf_reader = PdfReader(pdf_stream)
+            if len(pdf_reader.pages) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="PDF file contains no pages"
+                )
+            
             documents = []
             document_sources = []
             
             # Process each page
             for page_num, page in enumerate(pdf_reader.pages):
-                text = page.extract_text()
-                if text and not text.isspace():
-                    # Chunk the text
-                    chunks = chunk_text(text)
-                    documents.extend(chunks)
-                    document_sources.extend([
-                        f"{file.filename} (Page {page_num+1}, Chunk {i+1})" 
-                        for i in range(len(chunks))
-                    ])
+                try:
+                    text = page.extract_text()
+                    if text and not text.isspace():
+                        # Chunk the text
+                        chunks = chunk_text(text)
+                        documents.extend(chunks)
+                        document_sources.extend([
+                            f"{file.filename} (Page {page_num+1}, Chunk {i+1})" 
+                            for i in range(len(chunks))
+                        ])
+                except Exception as e:
+                    logger.error(f"Error processing page {page_num + 1}: {str(e)}")
+                    continue
             
             if not documents:
-                raise HTTPException(status_code=400, detail="No text content found in PDF")
+                raise HTTPException(
+                    status_code=400,
+                    detail="No text content could be extracted from PDF"
+                )
             
-            # Add to vector database in batches
-            batch_size = 100
+            # Add to vector database in smaller batches
+            batch_size = 50  # Reduced batch size
             total_added = 0
             
             while total_added < len(documents):
@@ -113,8 +158,10 @@ async def upload_pdf(file: UploadFile = File(...)):
                     )
                 except Exception as e:
                     logger.error(f"Error adding batch to database: {str(e)}")
-                    # Only raise 500 for database errors
-                    raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Database error: {str(e)}"
+                    )
                 
                 total_added = batch_end
             
@@ -125,19 +172,28 @@ async def upload_pdf(file: UploadFile = File(...)):
             }
             
         except PdfStreamError as e:
-            # Handle PDF parsing errors with 400 status
             logger.error(f"Error reading PDF: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Invalid PDF file: {str(e)}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid PDF file: {str(e)}"
+            )
         except Exception as e:
-            # Handle other PDF-related errors
-            logger.error(f"Error reading PDF: {str(e)}")
+            logger.error(f"Error processing PDF: {str(e)}")
             if "PDF" in str(e) or "pdf" in str(e):
-                raise HTTPException(status_code=400, detail=f"Invalid PDF file: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid PDF file: {str(e)}"
+                )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error processing PDF: {str(e)}"
+            )
             
     except HTTPException:
-        # Re-raise HTTP exceptions
         raise
     except Exception as e:
         logger.error(f"Error processing upload: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )

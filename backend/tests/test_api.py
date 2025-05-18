@@ -183,4 +183,33 @@ def test_error_handling(clean_db):
             files={"file": ("malformed.pdf", f, "application/pdf")}
         )
         assert response.status_code == 400
-        assert "Invalid PDF file" in response.json()["detail"] 
+        assert "Invalid PDF file" in response.json()["detail"]
+
+def test_delete_document(clean_db, sample_pdf, mock_gemini):
+    """Test document deletion functionality"""
+    # First upload a document
+    with open(sample_pdf, "rb") as pdf:
+        upload_response = client.post(
+            "/api/upload",
+            files={"file": ("test.pdf", pdf, "application/pdf")}
+        )
+        assert upload_response.status_code == 200
+
+    # Test deleting the document
+    response = client.delete("/api/upload/test.pdf")
+    assert response.status_code == 200
+    data = response.json()
+    assert "message" in data
+    assert "test.pdf" in data["message"]
+
+    # Verify document is deleted by trying to query it
+    query = {"query": "What is this document about?"}
+    chat_response = client.post("/api/chat", json=query)
+    assert chat_response.status_code == 200
+    chat_data = chat_response.json()
+    assert "No relevant information found" in chat_data["answer"]
+
+    # Test deleting non-existent document
+    response = client.delete("/api/upload/nonexistent.pdf")
+    assert response.status_code == 404
+    assert "detail" in response.json() 
