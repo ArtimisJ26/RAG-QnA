@@ -53,9 +53,9 @@ A Retrieval-Augmented Generation (RAG) system for question answering on PDF docu
 
 ### Usage
 
-Run the main script:
+Run the backend:
 ```bash
-python RAG_backend.py
+uvicorn backend.app.main:app --reload
 ```
 
 The system will:

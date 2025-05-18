@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api import chat, pdf_upload
+from app.api import chat, pdf_upload
 
 app = FastAPI()
 
@@ -18,3 +18,8 @@ app.include_router(pdf_upload.router, prefix="/api/upload")
 @app.get("/")
 def read_root():
     return {"message": "Backend is running"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy"}

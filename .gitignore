@@ -27,3 +27,17 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Python cache patterns (additional coverage)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+
+# Python cache patterns (additional coverage)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python

@@ -3,17 +3,25 @@ import glob
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from typing import List
 import chromadb
-import PyPDF2
+from pypdf import PdfReader
+from pypdf.errors import PdfStreamError
 from dotenv import load_dotenv
 from google import genai
 import uuid
+import logging
+from io import BytesIO
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # Load environment variables
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    logger.warning("GOOGLE_API_KEY not found in environment variables")
 
 
 # Custom embedding function for ChromaDB
@@ -62,51 +70,74 @@ async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
     
-    # Writes the uploaded file to a temporary location on disk.
-    temp_path = f"./temp_{file.filename}"
-    with open(temp_path, "wb") as buffer:
-        buffer.write(await file.read())
-
-
     try:
-
-        documents, document_sources = [], []
-
-        # Open the uploaded PDF file.
-        with open(temp_path, 'rb') as pdf_file:
-            pdf_reader = PyPDF2.PdfReader(pdf_file, strict=False)
-            filename = file.filename
-
-            # Loop through each page.
+        # Read the file into memory
+        contents = await file.read()
+        pdf_stream = BytesIO(contents)
+        
+        try:
+            # Try to read the PDF
+            pdf_reader = PdfReader(pdf_stream)
+            documents = []
+            document_sources = []
+            
+            # Process each page
             for page_num, page in enumerate(pdf_reader.pages):
-                # Extract and clean the text.
                 text = page.extract_text()
                 if text and not text.isspace():
+                    # Chunk the text
                     chunks = chunk_text(text)
                     documents.extend(chunks)
-                    # Store that text in a list (to prepare for chunking + embedding later).
-                    document_sources.extend([f"{filename} (Page {page_num+1}, Chunk {i+1})" for i in range(len(chunks))])
-        
-        # Add to vector database
-        if documents:
-            db.add(
-                documents=documents,
-                ids=[str(uuid.uuid4()) for _ in documents],
-                metadatas=[{"source": source} for source in document_sources]
-            )
-        
-        # Clean up temp file
-        os.remove(temp_path)
-        
-        return {
-            "filename": file.filename,
-            "pages_processed": len(documents),
-            "total_documents": db.count()
-            # "extracted_pages": documents    # For checking generated chunks of documents
-        }
-
+                    document_sources.extend([
+                        f"{file.filename} (Page {page_num+1}, Chunk {i+1})" 
+                        for i in range(len(chunks))
+                    ])
+            
+            if not documents:
+                raise HTTPException(status_code=400, detail="No text content found in PDF")
+            
+            # Add to vector database in batches
+            batch_size = 100
+            total_added = 0
+            
+            while total_added < len(documents):
+                batch_end = min(total_added + batch_size, len(documents))
+                batch_docs = documents[total_added:batch_end]
+                batch_sources = document_sources[total_added:batch_end]
+                
+                try:
+                    db.add(
+                        documents=batch_docs,
+                        ids=[str(uuid.uuid4()) for _ in batch_docs],
+                        metadatas=[{"source": source} for source in batch_sources]
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding batch to database: {str(e)}")
+                    # Only raise 500 for database errors
+                    raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+                
+                total_added = batch_end
+            
+            return {
+                "filename": file.filename,
+                "pages_processed": len(pdf_reader.pages),
+                "chunks_processed": len(documents)
+            }
+            
+        except PdfStreamError as e:
+            # Handle PDF parsing errors with 400 status
+            logger.error(f"Error reading PDF: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Invalid PDF file: {str(e)}")
+        except Exception as e:
+            # Handle other PDF-related errors
+            logger.error(f"Error reading PDF: {str(e)}")
+            if "PDF" in str(e) or "pdf" in str(e):
+                raise HTTPException(status_code=400, detail=f"Invalid PDF file: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+            
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        # Clean up on error
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+        logger.error(f"Error processing upload: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
