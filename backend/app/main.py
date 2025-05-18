@@ -18,3 +18,8 @@ app.include_router(pdf_upload.router, prefix="/api/upload")
 @app.get("/")
 def read_root():
     return {"message": "Backend is running"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy"}

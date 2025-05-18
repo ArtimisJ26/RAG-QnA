@@ -1,58 +1,63 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from app.api.pdf_upload import db, GeminiEmbeddingFunction
-import chromadb
+from google import genai
+from app.api.pdf_upload import db, embed_fn
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# ChromaDB client and collection
-embed_fn = GeminiEmbeddingFunction()
-embed_fn.document_mode = False
-chroma_client = chromadb.Client()
-db = chroma_client.get_or_create_collection(name="document_db", embedding_function=embed_fn)
-
-class ChatRequest(BaseModel):
+class Query(BaseModel):
     query: str
 
 @router.post("/")
-async def chat(req: ChatRequest):
-    query = req.query.strip()
-    
-    if not query:
+async def chat(query: Query):
+    if not query.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
-
-    # Step 2 : Retrieve relevant chunks
-    try:
-        results = db.query(query_texts=[query], n_results=3)
-        relevant_chunks = results["documents"][0]
-        sources = results["metadatas"][0]
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Retrieval failed: {str(e)}")
     
-    # STEP 3: Generate final answer using Gemini
     try:
-        # Combine chunks into context string
-        docs = results["documents"][0]
-        context = "\n\n".join([doc for doc in docs])
+        # Switch embedding function to query mode
+        embed_fn.document_mode = False
+        
+        # Get relevant documents
+        results = db.query(
+            query_texts=[query.query],
+            n_results=3,
+            include=["documents", "metadatas"]
+        )
+        
+        # Switch back to document mode
+        embed_fn.document_mode = True
+        
+        if not results["documents"][0]:
+            return {"answer": "No relevant information found in the documents."}
+        
+        # Prepare context from retrieved documents
+        context = "\n\n".join(results["documents"][0])
+        sources = [meta["source"] for meta in results["metadatas"][0]]
+        
+        # Prepare prompt
+        prompt = f"""Answer the following question based on the provided context. If the context doesn't contain relevant information, say so.
 
-        prompt = f"""
-        You are a helpful assistant. Use the following document excerpts to answer the question.
+Context: {context}
 
-        Document context:
-        {context}
-
-        Question: {query}
-        """
-
-        # Use Gemini Pro for text generation        
-        response = embed_fn.client.models.generate_content(
-            model="gemini-2.0-flash",  # Using Gemini's fast model
-            contents=prompt)  # The prompt with query and context
-
-        answer = response.text
-
-        return {"answer": answer}
-
+Question: {query.query}"""
+        
+        # Generate response using Gemini
+        client = genai.Client()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
+        
+        return {
+            "answer": response.text,
+            "sources": sources
+        }
+    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating answer: {str(e)}")
+        logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
