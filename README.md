@@ -58,6 +58,13 @@ Run the backend:
 uvicorn backend.app.main:app --reload
 ```
 
+Run the frontend:
+```bash
+cd frontend
+npm run dev
+```
+
+
 The system will:
 1. Load and process all PDFs in the `pdfs` directory
 2. Create embeddings and store them in a vector database
