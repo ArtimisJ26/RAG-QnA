@@ -23,20 +23,20 @@ export default function DocumentList({ documents, onDelete }: DocumentListProps)
   if (!documents.length) return null;
 
   return (
-    <div className="w-full">
+    <div>
       <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-        Uploaded Documents
+        Your Documents
       </h3>
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-        <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-          {documents.map((doc, index) => (
-            <li
-              key={index}
-              className="flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              <div className="flex items-center space-x-4">
+      <div className="space-y-2">
+        {documents.map((doc, index) => (
+          <div
+            key={index}
+            className="group bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start space-x-3">
                 <svg
-                  className="h-6 w-6 text-gray-400"
+                  className="h-5 w-5 text-gray-400 mt-1"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -49,37 +49,36 @@ export default function DocumentList({ documents, onDelete }: DocumentListProps)
                   />
                 </svg>
                 <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white break-all">
                     {doc.name}
                   </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     {formatFileSize(doc.size)} • {doc.uploadedAt}
                   </p>
                 </div>
               </div>
-              {onDelete && (
-                <button
-                  onClick={() => onDelete(doc)}
-                  className="text-red-500 hover:text-red-700 p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              
+              <button
+                onClick={() => onDelete?.(doc)}
+                className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  <svg
-                    className="h-5 w-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
