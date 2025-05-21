@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import chat, pdf_upload, documents
+from app.api import chat, pdf_upload, documents, embedding_status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -31,6 +31,7 @@ app.router.redirect_slashes = False
 app.include_router(chat.router, prefix="/api/chat")
 app.include_router(pdf_upload.router, prefix="/api/upload")
 app.include_router(documents.router, prefix="/api/documents")
+app.include_router(embedding_status.router, prefix="/api/embedding-status")
 
 @app.get("/")
 def read_root():

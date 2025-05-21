@@ -10,6 +10,7 @@ from google import genai
 import uuid
 import logging
 from io import BytesIO
+from .embedding_status import init_embedding_status, update_embedding_status
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -66,134 +67,169 @@ def chunk_text(text, max_length=500, overlap=50):
 # Define a POST endpoint /api/upload/ that accepts a PDF file.
 @router.post("")
 async def upload_pdf(file: UploadFile = File(...)):
-    # Get the maximum file size from app state
-    max_size = 50 * 1024 * 1024  # 50MB default if not set in app state
-    
-    # Validate that the uploaded file ends in .pdf first
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
-    
+    # Initialize embedding status
+    init_embedding_status(file.filename)
+    update_embedding_status(file.filename, 'processing', 0)
+
     try:
-        # Read file in chunks to avoid memory issues
-        contents = bytearray()
-        file_size = 0
-        chunk_size = 1024 * 1024  # 1MB chunks
+        # Get the maximum file size from app state
+        max_size = 50 * 1024 * 1024  # 50MB default if not set in app state
         
-        while True:
-            try:
-                chunk = await file.read(chunk_size)
-                if not chunk:
-                    break
-                file_size += len(chunk)
-                if file_size > max_size:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"File too large. Maximum size allowed is 50MB"
-                    )
-                contents.extend(chunk)
-            except Exception as e:
-                logger.error(f"Error reading chunk: {str(e)}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Error during file upload. Please try again."
-                )
-        
-        if file_size == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Empty file uploaded"
-            )
-        
-        # Create BytesIO object from contents
-        pdf_stream = BytesIO(contents)
+        # Validate that the uploaded file ends in .pdf first
+        if not file.filename.endswith('.pdf'):
+            update_embedding_status(file.filename, 'error', 0, "Only PDF files are allowed")
+            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
         
         try:
-            # Try to read the PDF
-            pdf_reader = PdfReader(pdf_stream)
-            if len(pdf_reader.pages) == 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="PDF file contains no pages"
-                )
+            # Read file in chunks to avoid memory issues
+            contents = bytearray()
+            file_size = 0
+            chunk_size = 1024 * 1024  # 1MB chunks
             
-            documents = []
-            document_sources = []
-            
-            # Process each page
-            for page_num, page in enumerate(pdf_reader.pages):
+            while True:
                 try:
-                    text = page.extract_text()
-                    if text and not text.isspace():
-                        # Chunk the text
-                        chunks = chunk_text(text)
-                        documents.extend(chunks)
-                        document_sources.extend([
-                            f"{file.filename} (Page {page_num+1}, Chunk {i+1})" 
-                            for i in range(len(chunks))
-                        ])
+                    chunk = await file.read(chunk_size)
+                    if not chunk:
+                        break
+                    file_size += len(chunk)
+                    if file_size > max_size:
+                        update_embedding_status(file.filename, 'error', 0, "File too large")
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"File too large. Maximum size allowed is 50MB"
+                        )
+                    contents.extend(chunk)
                 except Exception as e:
-                    logger.error(f"Error processing page {page_num + 1}: {str(e)}")
-                    continue
-            
-            if not documents:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No text content could be extracted from PDF"
-                )
-            
-            # Add to vector database in smaller batches
-            batch_size = 50  # Reduced batch size
-            total_added = 0
-            
-            while total_added < len(documents):
-                batch_end = min(total_added + batch_size, len(documents))
-                batch_docs = documents[total_added:batch_end]
-                batch_sources = document_sources[total_added:batch_end]
-                
-                try:
-                    db.add(
-                        documents=batch_docs,
-                        ids=[str(uuid.uuid4()) for _ in batch_docs],
-                        metadatas=[{"source": source} for source in batch_sources]
-                    )
-                except Exception as e:
-                    logger.error(f"Error adding batch to database: {str(e)}")
+                    logger.error(f"Error reading chunk: {str(e)}")
+                    update_embedding_status(file.filename, 'error', 0, str(e))
                     raise HTTPException(
                         status_code=500,
-                        detail=f"Database error: {str(e)}"
+                        detail="Error during file upload. Please try again."
+                    )
+            
+            if file_size == 0:
+                update_embedding_status(file.filename, 'error', 0, "Empty file uploaded")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Empty file uploaded"
+                )
+            
+            # Create BytesIO object from contents
+            pdf_stream = BytesIO(contents)
+            
+            try:
+                # Try to read the PDF
+                pdf_reader = PdfReader(pdf_stream)
+                if len(pdf_reader.pages) == 0:
+                    update_embedding_status(file.filename, 'error', 0, "PDF file contains no pages")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="PDF file contains no pages"
                     )
                 
-                total_added = batch_end
-            
-            return {
-                "filename": file.filename,
-                "pages_processed": len(pdf_reader.pages),
-                "chunks_processed": len(documents)
-            }
-            
-        except PdfStreamError as e:
-            logger.error(f"Error reading PDF: {str(e)}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid PDF file: {str(e)}"
-            )
-        except Exception as e:
-            logger.error(f"Error processing PDF: {str(e)}")
-            if "PDF" in str(e) or "pdf" in str(e):
+                documents = []
+                document_sources = []
+                
+                # Update status to show PDF reading progress
+                update_embedding_status(file.filename, 'processing', 10, "Reading PDF pages")
+                
+                # Process each page
+                for page_num, page in enumerate(pdf_reader.pages):
+                    try:
+                        text = page.extract_text()
+                        if text and not text.isspace():
+                            # Chunk the text
+                            chunks = chunk_text(text)
+                            documents.extend(chunks)
+                            document_sources.extend([
+                                f"{file.filename} (Page {page_num+1}, Chunk {i+1})" 
+                                for i in range(len(chunks))
+                            ])
+                            
+                            # Update progress based on page processing (40% of total progress)
+                            progress = 10 + int((page_num + 1) / len(pdf_reader.pages) * 40)
+                            update_embedding_status(file.filename, 'processing', progress, "Processing PDF pages")
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing page {page_num + 1}: {str(e)}")
+                        continue
+                
+                if not documents:
+                    update_embedding_status(file.filename, 'error', 0, "No text content could be extracted")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No text content could be extracted from PDF"
+                    )
+                
+                # Add to vector database in smaller batches
+                batch_size = 50  # Reduced batch size
+                total_added = 0
+                
+                while total_added < len(documents):
+                    batch_end = min(total_added + batch_size, len(documents))
+                    batch_docs = documents[total_added:batch_end]
+                    batch_sources = document_sources[total_added:batch_end]
+                    
+                    try:
+                        db.add(
+                            documents=batch_docs,
+                            ids=[str(uuid.uuid4()) for _ in batch_docs],
+                            metadatas=[{"source": source} for source in batch_sources]
+                        )
+                        
+                        # Update progress based on embedding progress (50% of total progress)
+                        progress = 50 + int((total_added + len(batch_docs)) / len(documents) * 50)
+                        update_embedding_status(file.filename, 'processing', progress, "Creating embeddings")
+                        
+                    except Exception as e:
+                        logger.error(f"Error adding batch to database: {str(e)}")
+                        update_embedding_status(file.filename, 'error', progress, str(e))
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Database error: {str(e)}"
+                        )
+                    
+                    total_added = batch_end
+                
+                # Update status to complete
+                update_embedding_status(file.filename, 'complete', 100)
+                
+                return {
+                    "filename": file.filename,
+                    "pages_processed": len(pdf_reader.pages),
+                    "chunks_processed": len(documents)
+                }
+                
+            except PdfStreamError as e:
+                logger.error(f"Error reading PDF: {str(e)}")
+                update_embedding_status(file.filename, 'error', 0, str(e))
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid PDF file: {str(e)}"
                 )
+            except Exception as e:
+                logger.error(f"Error processing PDF: {str(e)}")
+                update_embedding_status(file.filename, 'error', 0, str(e))
+                if "PDF" in str(e) or "pdf" in str(e):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid PDF file: {str(e)}"
+                    )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error processing PDF: {str(e)}"
+                )
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error processing upload: {str(e)}", exc_info=True)
+            update_embedding_status(file.filename, 'error', 0, str(e))
             raise HTTPException(
                 status_code=500,
-                detail=f"Error processing PDF: {str(e)}"
+                detail=str(e)
             )
-            
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error processing upload: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+        # Ensure status is updated even if an unexpected error occurs
+        update_embedding_status(file.filename, 'error', 0, str(e))
+        raise
